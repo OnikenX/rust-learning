@@ -1,3 +1,4 @@
+use tokio::runtime::enter::context;
 
 fn cenas(){
     println!("Hello boys!");
@@ -25,4 +26,10 @@ fn cenas(){
 
 fn fac (num : u32) -> u32 {
     (1..=num).product()
+}
+
+fn main() {
+    let node = tokio::new();
+
+    println!("boas");
 }

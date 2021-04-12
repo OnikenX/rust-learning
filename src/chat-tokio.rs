@@ -18,80 +18,77 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-//! A basic chat application demonstrating libp2p and the mDNS and floodsub protocols.
+//! A basic chat application demonstrating libp2p with the mDNS and floodsub protocols
+//! using tokio for all asynchronous tasks and I/O. In order for all used libp2p
+//! crates to use tokio, it enables tokio-specific features for some crates.
 //!
-//! Using two terminal windows, start two instances. If you local network allows mDNS,
-//! they will automatically connect. Type a message in either terminal and hit return: the
-//! message is sent and printed in the other terminal. Close with Ctrl-c.
-//!
-//! You can of course open more terminal windows and add more participants.
-//! Dialing any of the other peers will propagate the new participant to all
-//! chat members and everyone will receive all messages.
-//!
-//! # If they don't automatically connect
-//!
-//! If the nodes don't automatically connect, take note of the listening address of the first
-//! instance and start the second with this address as the first argument. In the first terminal
-//! window, run:
+//! The example is run per node as follows:
 //!
 //! ```sh
-//! cargo run --example chat
+//! cargo run --example chat-tokio --features="tcp-tokio mdns-tokio"
 //! ```
 //!
-//! It will print the PeerId and the listening address, e.g. `Listening on
-//! "/ip4/0.0.0.0/tcp/24915"`
-//!
-//! In the second terminal window, start a new instance of the example with:
+//! Alternatively, to run with the minimal set of features and crates:
 //!
 //! ```sh
-//! cargo run --example chat -- /ip4/127.0.0.1/tcp/24915
+//!cargo run --example chat-tokio \\
+//!    --no-default-features \\
+//!    --features="floodsub mplex noise tcp-tokio mdns-tokio"
 //! ```
-//!
-//! The two nodes then connect.
 
-
-use async_std::{io, task};
-use futures::{future, prelude::*};
 use libp2p::{
-    Multiaddr,
+    NetworkBehaviour,
     PeerId,
     Swarm,
-    NetworkBehaviour,
+    Transport,
+    core::upgrade,
     identity,
     floodsub::{self, Floodsub, FloodsubEvent},
     mdns::{Mdns, MdnsEvent},
-    swarm::NetworkBehaviourEventProcess
+    mplex,
+    noise,
+    swarm::{NetworkBehaviourEventProcess, SwarmBuilder},
+    // `TokioTcpConfig` is available through the `tcp-tokio` feature.
+    tcp::TokioTcpConfig,
 };
-use std::{error::Error, task::{Context, Poll}};
-use async_std::prelude::*;
-#[async_std::main]
+use std::error::Error;
+use tokio::io::{self, AsyncBufReadExt};
+use libp2p::core::Multiaddr;
+
+/// The `tokio::main` attribute sets up a tokio runtime.
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
 
-    // Create a random PeerId
-    let local_key = identity::Keypair::generate_ed25519();
-    let local_peer_id = PeerId::from(local_key.public());
-    println!("Local peer id: {:?}", local_peer_id);
+    // Create a random PeerId public-private keys
+    let id_keys = identity::Keypair::generate_ed25519();
+    let peer_id = PeerId::from(id_keys.public());
+    println!("Local peer id: {:?}", peer_id);
 
-    // Set up a an encrypted DNS-enabled TCP Transport over the Mplex and Yamux protocols
-    let transport = libp2p::development_transport(local_key).await?;
+    // Create a keypair for authenticated encryption of the transport.
+    let noise_keys = noise::Keypair::<noise::X25519Spec>::new()
+        .into_authentic(&id_keys)
+        .expect("Signing libp2p-noise static DH keypair failed.");
+
+    // Create a tokio-based TCP transport use noise for authenticated
+    // encryption and Mplex for multiplexing of substreams on a TCP stream.
+    let transport = TokioTcpConfig::new().nodelay(true)
+        .upgrade(upgrade::Version::V1)
+        .authenticate(noise::NoiseConfig::xx(noise_keys).into_authenticated())
+        .multiplex(mplex::MplexConfig::new())
+        .boxed();
 
     // Create a Floodsub topic
     let floodsub_topic = floodsub::Topic::new("chat");
 
     // We create a custom network behaviour that combines floodsub and mDNS.
-    // In the future, we want to improve libp2p to make this easier to do.
-    // Use the derive to generate delegating NetworkBehaviour impl and require the
-    // NetworkBehaviourEventProcess implementations below.
+    // The derive generates a delegating `NetworkBehaviour` impl which in turn
+    // requires the implementations of `NetworkBehaviourEventProcess` for
+    // the events of each behaviour.
     #[derive(NetworkBehaviour)]
     struct MyBehaviour {
         floodsub: Floodsub,
         mdns: Mdns,
-
-        // Struct fields which do not implement NetworkBehaviour need to be ignored
-        #[behaviour(ignore)]
-        #[allow(dead_code)]
-        ignored_member: bool,
     }
 
     impl NetworkBehaviourEventProcess<FloodsubEvent> for MyBehaviour {
@@ -117,21 +114,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             self.floodsub.remove_node_from_partial_view(&peer);
                         }
                     }
-            }
+}
         }
     }
 
-    // Create a Swarm to manage peers and events
+    // Create a Swarm to manage peers and events.
     let mut swarm = {
-        let mdns = task::block_on(Mdns::new(MdnsConfig::default()))?;
+        let mdns = Mdns::new(/*Default::default()*/).expect("Mdns creation");
         let mut behaviour = MyBehaviour {
-            floodsub: Floodsub::new(local_peer_id.clone()),
+            floodsub: Floodsub::new(peer_id.clone()),
             mdns,
-            ignored_member: false,
         };
 
         behaviour.floodsub.subscribe(floodsub_topic.clone());
-        Swarm::new(transport, behaviour, local_peer_id)
+
+        SwarmBuilder::new(transport, behaviour, peer_id)
+            // We want the connection background tasks to be spawned
+            // onto the tokio runtime.
+            .executor(Box::new(|fut| { tokio::spawn(fut); }))
+            .build()
     };
 
     // Reach out to another node if specified
@@ -145,33 +146,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut stdin = io::BufReader::new(io::stdin()).lines();
 
     // Listen on all interfaces and whatever port the OS assigns
-    Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/0".parse()?)?;
+    Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/5555".parse()?)?;
 
     // Kick it off
     let mut listening = false;
-    task::block_on(future::poll_fn(move |cx: &mut Context<'_>| {
-        loop {
-            match stdin.try_poll_next_unpin(cx)? {
-                Poll::Ready(Some(line)) => swarm.floodsub.publish(floodsub_topic.clone(), line.as_bytes()),
-                Poll::Ready(None) => panic!("Stdin closed"),
-                Poll::Pending => break
-            }
-        }
-        loop {
-            match swarm.poll_next_unpin(cx) {
-                Poll::Ready(Some(event)) => println!("{:?}", event),
-                Poll::Ready(None) => return Poll::Ready(Ok(())),
-                Poll::Pending => {
-                    if !listening {
-                        for addr in Swarm::listeners(&swarm) {
-                            println!("Listening on {:?}", addr);
-                            listening = true;
-                        }
-                    }
-                    break
+    loop {
+        let to_publish = {
+            tokio::select! {
+                line = stdin.next_line() => {
+                    let line = line?.expect("stdin closed");
+                    Some((floodsub_topic.clone(), line))
+                }
+                event = swarm.next() => {
+                    // All events are handled by the `NetworkBehaviourEventProcess`es.
+                    // I.e. the `swarm.next()` future drives the `Swarm` without ever
+                    // terminating.
+                    panic!("Unexpected event: {:?}", event);
                 }
             }
+        };
+
+        if let Some((topic, line)) = to_publish {
+            swarm.floodsub.publish(topic, line.as_bytes());
         }
-        Poll::Pending
-    }))
+
+        if !listening {
+            for addr in Swarm::listeners(&swarm) {
+                println!("Listening on {:?}", addr);
+                listening = true;
+            }
+        }
+    }
 }
