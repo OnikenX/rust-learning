@@ -1,26 +1,66 @@
 [package]
 name = "rust-learning"
-version = "0.1.0"
-authors = ["OnikenX <OnikenX@pm.me>"]
 edition = "2018"
+version = "0.2.0"
+authors = ["OnikenX <OnikenX@pm.me>"]
+license = "MIT"
+repository = "https://github.com/OnikenX/rust-learning"
+keywords = ["peer-to-peer", "libp2p", "networking"]
+categories = ["network-programming", "asynchronous"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "main"
+path = "src/main.rs"
 
+[[bin]]
+name = "key-management"
+path = "src/key-management.rs"
 
 [[bin]]
 name = "gossipsub-chat"
-path = "src/gossipsub-chat.rs"
+path = "examples/gossipsub-chat.rs"
+
+[[bin]]
+name = "brincadeiras"
+path = "examples/brincadeiras.rs"
+
+[[bin]]
+name = "chat"
+path = "examples/chat.rs"
+
+[[bin]]
+name = "chat-tokio"
+path = "examples/chat-tokio.rs"
+required-features = ["tcp-tokio", "mdns"]
+
+#[[bin]]
+##from https://blog.logrocket.com/libp2p-tutorial-build-a-peer-to-peer-app-in-rust/
+#name = "libp2p-test"
+#path = "example/libp2p-test.rs"
+
+
+
+[[bin]]
+name = "rust-learning"
+path = "src/rust-learning.rs"
+
 
 [dependencies]
-async-std = { version = "1.6.2", features = ["attributes"] }
+async-std = { version = "*", features = ["attributes"] }
+env_logger = "*"
 futures = "*"
-libp2p = { version = "0.31", features = ["tcp-tokio", "mdns-tokio", "floodsub","mplex", "noise", "gossipsub", "default"] }
-libp2p-gossipsub = {version = "0.29.0"}
-#, features = ["IdentTopic"]
-tokio = { version = "0.3", features = ["io-util", "io-std", "stream", "macros", "rt", "rt-multi-thread", "fs", "time", "sync"] }
-serde = {version = "=1.0", features = ["derive"] }
-serde_json = "1.0"
-once_cell = "1.5"
-log = "0.4"
-pretty_env_logger = "0.4"
-env_logger = "0.8.1"
+libp2p = {version = "*", features = ["tcp-tokio", "mdns"]}
+tokio = { version = "*", features = ["io-util", "io-std", "stream", "macros", "rt", "rt-multi-thread", "fs", "time", "sync"] }
+serde = {version = "*", features = ["derive"] }
+serde_json = "*"
+once_cell = "*"
+log = "*"
+pretty_env_logger = "*"
+rustc-serialize = "*"
+#atomic = "0.5.0"
+#bytes = "1"
+#parking_lot = "0.11.0"
+#lazy_static = "1.2"
+#pin-project = "1.0.0"
+#smallvec = "1.6.1"
+#wasm-timer = "0.2.4"

@@ -104,25 +104,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         // add an explicit peer if one was provided
         if let Some(explicit) = std::env::args().nth(2) {
-            let explicit = explicit.clone();
+            // let explicit = explicit.clone();
             match explicit.parse() {
                 Ok(id) => gossipsub.add_explicit_peer(&id),
                 Err(err) => println!("Failed to parse explicit peer id: {:?}", err),
             }
         }
-
         // build the swarm
         libp2p::Swarm::new(transport, gossipsub, local_peer_id)
     };
 
     // Listen on all interfaces and whatever port the OS assigns
-    swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse().unwrap()).unwrap();
+    libp2p::Swarm::listen_on(&mut swarm, "/ip4/0.0.0.0/tcp/0".parse().unwrap()).unwrap();
 
     // Reach out to another node if specified
     if let Some(to_dial) = std::env::args().nth(1) {
         let dialing = to_dial.clone();
         match to_dial.parse() {
-            Ok(to_dial) => match swarm.dial_addr(to_dial) {
+            Ok(to_dial) => match libp2p::Swarm::dial_addr(&mut swarm, to_dial) {
                 Ok(_) => println!("Dialed {:?}", dialing),
                 Err(e) => println!("Dial {:?} failed: {:?}", dialing, e),
             },
@@ -138,7 +137,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     task::block_on(future::poll_fn(move |cx: &mut Context<'_>| {
         loop {
             if let Err(e) = match stdin.try_poll_next_unpin(cx)? {
-                Poll::Ready(Some(line)) => swarm.behaviour_mut().publish(topic.clone(), line.as_bytes()),
+                Poll::Ready(Some(line)) => swarm.publish(topic.clone(), line.as_bytes()),
                 Poll::Ready(None) => panic!("Stdin closed"),
                 Poll::Pending => break,
             } {
@@ -171,7 +170,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 listening = true;
             }
         }
-
         Poll::Pending
     }))
 }

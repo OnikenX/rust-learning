@@ -2,7 +2,7 @@ use libp2p::{
     core::upgrade,
     floodsub::{Floodsub, FloodsubEvent, Topic},
     identity,
-    mdns::{MdnsEvent, TokioMdns},
+    mdns::{MdnsEvent, tokio-mdns},
     mplex,
     noise::{Keypair, NoiseConfig, X25519Spec},
     swarm::{NetworkBehaviourEventProcess, Swarm, SwarmBuilder},
@@ -221,7 +221,7 @@ async fn main() {
             .expect("can get a local socket"),
     )
     .expect("swarm can be started");
-    dbg!(swarm);
+
     loop {
         let evt = {
             tokio::select! {

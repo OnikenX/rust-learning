@@ -1,4 +1,4 @@
-use tokio::runtime::enter::context;
+
 
 fn cenas(){
     println!("Hello boys!");
@@ -28,8 +28,18 @@ fn fac (num : u32) -> u32 {
     (1..=num).product()
 }
 
-fn main() {
-    let node = tokio::new();
+fn result_return() -> Result<(), ()>{
+    Err(())
+}
 
+fn main() -> Result<(), ()>{
+    // let node = tokio::new();
+    if let () = result_return() {
+        println!("isto é o if");
+    }
+    {
+        println!("isto é um else");
+    }
     println!("boas");
+    Ok(())
 }
